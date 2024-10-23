@@ -1,4 +1,4 @@
-module github.com/daytonaio/daytona-provider-sample
+module github.com/daytonaio/daytona-provider-hetzner
 
 go 1.23.0
 
