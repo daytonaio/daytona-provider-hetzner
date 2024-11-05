@@ -58,14 +58,14 @@ func TestWorkspaceInfo(t *testing.T) {
 
 	expectedMetadata := types.ToWorkspaceMetadata(server)
 
-	if expectedMetadata.ServerID != expectedMetadata.ServerID {
-		t.Fatalf("Expected vm id %d, got %d",
+	if expectedMetadata.ServerID != workspaceMetadata.ServerID {
+		t.Fatalf("Expected server id %d, got %d",
 			expectedMetadata.ServerID,
 			expectedMetadata.ServerID,
 		)
 	}
 
-	if expectedMetadata.ServerName != expectedMetadata.ServerName {
+	if expectedMetadata.ServerName != workspaceMetadata.ServerName {
 		t.Fatalf("Expected server name %s, got %s",
 			expectedMetadata.ServerName,
 			expectedMetadata.ServerName,
