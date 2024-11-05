@@ -10,6 +10,7 @@ import (
 
 	"github.com/daytonaio/daytona-provider-hetzner/internal"
 	logwriters "github.com/daytonaio/daytona-provider-hetzner/internal/log"
+	hetznerutil "github.com/daytonaio/daytona-provider-hetzner/pkg/provider/util"
 	"github.com/daytonaio/daytona-provider-hetzner/pkg/types"
 	"github.com/daytonaio/daytona/pkg/agent/ssh/config"
 	"github.com/daytonaio/daytona/pkg/docker"
@@ -79,10 +80,12 @@ func (h *HetznerProvider) CreateWorkspace(workspaceReq *provider.WorkspaceReques
 		return nil, err
 	}
 
-	_ = targetOptions
 	initScript := fmt.Sprintf(`curl -sfL -H "Authorization: Bearer %s" %s | bash`, workspaceReq.Workspace.ApiKey, *h.DaytonaDownloadUrl)
-	_ = initScript
-	// TODO: call hetzner api to create workspace
+	err = hetznerutil.CreateWorkspace(workspaceReq.Workspace, targetOptions, initScript, logWriter)
+	if err != nil {
+		logWriter.Write([]byte("Failed to create workspace: " + err.Error() + "\n"))
+		return nil, err
+	}
 
 	agentSpinner := logwriters.ShowSpinner(logWriter, "Waiting for the agent to start", "Agent started")
 	err = h.waitForDial(workspaceReq.Workspace.Id, 10*time.Minute)
@@ -128,9 +131,7 @@ func (h *HetznerProvider) StartWorkspace(workspaceReq *provider.WorkspaceRequest
 		return nil, err
 	}
 
-	_ = targetOptions
-	// TODO: call hetzner api to start workspace
-	return new(util.Empty), nil
+	return new(util.Empty), hetznerutil.StartWorkspace(workspaceReq.Workspace, targetOptions)
 }
 
 func (h *HetznerProvider) StopWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
@@ -143,9 +144,7 @@ func (h *HetznerProvider) StopWorkspace(workspaceReq *provider.WorkspaceRequest)
 		return nil, err
 	}
 
-	_ = targetOptions
-	// TODO: call hetzner api to stop workspace
-	return new(util.Empty), nil
+	return new(util.Empty), hetznerutil.StopWorkspace(workspaceReq.Workspace, targetOptions)
 }
 
 func (h *HetznerProvider) DestroyWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
@@ -158,9 +157,7 @@ func (h *HetznerProvider) DestroyWorkspace(workspaceReq *provider.WorkspaceReque
 		return nil, err
 	}
 
-	// TODO: call hetzner api to destroy workspace
-	_ = targetOptions
-	return new(util.Empty), nil
+	return new(util.Empty), hetznerutil.DeleteWorkspace(workspaceReq.Workspace, targetOptions)
 }
 
 func (h *HetznerProvider) GetWorkspaceInfo(workspaceReq *provider.WorkspaceRequest) (*workspace.WorkspaceInfo, error) {
@@ -308,9 +305,14 @@ func (h *HetznerProvider) getWorkspaceInfo(workspaceReq *provider.WorkspaceReque
 		return nil, err
 	}
 
-	// TODO: call hetzner api to get workspace info
-	_ = targetOptions
-	jsonMetadata, err := json.Marshal(nil)
+	server, err := hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
+	if err != nil {
+		logWriter.Write([]byte("Failed to get server: " + err.Error() + "\n"))
+		return nil, err
+	}
+
+	metadata := types.ToWorkspaceMetadata(server)
+	jsonMetadata, err := json.Marshal(metadata)
 	if err != nil {
 		return nil, err
 	}
