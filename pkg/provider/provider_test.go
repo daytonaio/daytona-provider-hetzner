@@ -1,135 +1,126 @@
-package provider_test
+package provider
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
+	"time"
 
-	"github.com/daytonaio/daytona/pkg/gitprovider"
-	daytona_provider "github.com/daytonaio/daytona/pkg/provider"
+	hetznerutil "github.com/daytonaio/daytona-provider-hetzner/pkg/provider/util"
+	"github.com/daytonaio/daytona-provider-hetzner/pkg/types"
+	"github.com/daytonaio/daytona/pkg/provider"
 	"github.com/daytonaio/daytona/pkg/workspace"
-	"github.com/daytonaio/daytona/pkg/workspace/project"
-
-	"github.com/daytonaio/daytona-provider-hetzner/pkg/provider"
-	provider_types "github.com/daytonaio/daytona-provider-hetzner/pkg/types"
 )
 
-var sampleProvider = &provider.HetznerProvider{}
-var targetOptions = &provider_types.TargetOptions{
-	RequiredString: "default-required-string",
-}
-var optionsString string
+var (
+	apiToken = os.Getenv("HETZNER_API_TOKEN")
 
-var project1 = &project.Project{
-	Name: "test",
-	Repository: &gitprovider.GitRepository{
-		Id:   "123",
-		Url:  "https://github.com/daytonaio/daytona",
-		Name: "daytona",
-	},
-	EnvVars: map[string]string{
-		"DAYTONA_WS_ID":                     "123",
-		"DAYTONA_WS_PROJECT_NAME":           "test",
-		"DAYTONA_WS_PROJECT_REPOSITORY_URL": "https://github.com/daytonaio/daytona",
-		"DAYTONA_SERVER_API_KEY":            "api-key-test",
-		"DAYTONA_SERVER_VERSION":            "latest",
-		"DAYTONA_SERVER_URL":                "http://localhost:3001",
-		"DAYTONA_SERVER_API_URL":            "http://localhost:3000",
-	},
-	WorkspaceId: "123",
-}
-
-var workspace1 = &workspace.Workspace{
-	Id:     "123",
-	Name:   "test",
-	Target: "local",
-	Projects: []*project.Project{
-		project1,
-	},
-}
-
-func TestCreateWorkspace(t *testing.T) {
-	wsReq := &daytona_provider.WorkspaceRequest{
-		TargetOptions: optionsString,
-		Workspace:     workspace1,
+	hetznerProvider = &HetznerProvider{}
+	targetOptions   = &types.TargetOptions{
+		Location:   "fsn1",
+		DiskImage:  "ubuntu-22.04",
+		DiskSize:   20,
+		ServerType: "cpx11",
+		APIToken:   apiToken,
 	}
 
-	_, err := sampleProvider.CreateWorkspace(wsReq)
+	workspaceReq *provider.WorkspaceRequest
+)
+
+func TestCreateWorkspace(t *testing.T) {
+	_, err := hetznerProvider.CreateWorkspace(workspaceReq)
 	if err != nil {
 		t.Errorf("Error creating workspace: %s", err)
 	}
+
+	_, err = hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
+	if err != nil {
+		t.Fatalf("Error getting server: %s", err)
+	}
 }
 
-func TestGetWorkspaceInfo(t *testing.T) {
-	wsReq := &daytona_provider.WorkspaceRequest{
-		TargetOptions: optionsString,
-		Workspace:     workspace1,
+func TestWorkspaceInfo(t *testing.T) {
+	workspaceInfo, err := hetznerProvider.GetWorkspaceInfo(workspaceReq)
+	if err != nil {
+		t.Fatalf("Error getting workspace info: %s", err)
 	}
 
-	workspaceInfo, err := sampleProvider.GetWorkspaceInfo(wsReq)
-	if err != nil || workspaceInfo == nil {
-		t.Errorf("Error getting workspace info: %s", err)
-	}
-
-	var workspaceMetadata provider_types.WorkspaceMetadata
+	var workspaceMetadata types.WorkspaceMetadata
 	err = json.Unmarshal([]byte(workspaceInfo.ProviderMetadata), &workspaceMetadata)
 	if err != nil {
-		t.Errorf("Error unmarshalling workspace metadata: %s", err)
+		t.Fatalf("Error unmarshalling workspace metadata: %s", err)
 	}
 
-	if workspaceMetadata.Property != wsReq.Workspace.Id {
-		t.Errorf("Expected network id %s, got %s", wsReq.Workspace.Id, workspaceMetadata.Property)
+	server, err := hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
+	if err != nil {
+		t.Fatalf("Error getting server: %s", err)
+	}
+
+	expectedMetadata := types.ToWorkspaceMetadata(server)
+
+	if expectedMetadata.ServerID != workspaceMetadata.ServerID {
+		t.Fatalf("Expected server id %d, got %d",
+			expectedMetadata.ServerID,
+			expectedMetadata.ServerID,
+		)
+	}
+
+	if expectedMetadata.ServerName != workspaceMetadata.ServerName {
+		t.Fatalf("Expected server name %s, got %s",
+			expectedMetadata.ServerName,
+			expectedMetadata.ServerName,
+		)
+	}
+
+	if expectedMetadata.ServerMemory != workspaceMetadata.ServerMemory {
+		t.Fatalf("Expected server memory %f, got %f",
+			expectedMetadata.ServerMemory,
+			workspaceMetadata.ServerMemory,
+		)
+	}
+
+	if expectedMetadata.Architecture != workspaceMetadata.Architecture {
+		t.Fatalf("Expected server architecture %s, got %s",
+			expectedMetadata.Architecture,
+			workspaceMetadata.Architecture,
+		)
+	}
+
+	if expectedMetadata.Location != workspaceMetadata.Location {
+		t.Fatalf("Expected server location %s, got %s",
+			expectedMetadata.Location,
+			workspaceMetadata.Location,
+		)
+	}
+
+	if expectedMetadata.Created != workspaceMetadata.Created {
+		t.Fatalf("Expected server created at %s, got %s",
+			expectedMetadata.Created,
+			workspaceMetadata.Created,
+		)
 	}
 }
 
 func TestDestroyWorkspace(t *testing.T) {
-	wsReq := &daytona_provider.WorkspaceRequest{
-		TargetOptions: optionsString,
-		Workspace:     workspace1,
-	}
-
-	_, err := sampleProvider.DestroyWorkspace(wsReq)
+	_, err := hetznerProvider.DestroyWorkspace(workspaceReq)
 	if err != nil {
-		t.Errorf("Error deleting workspace: %s", err)
+		t.Fatalf("Error destroying workspace: %s", err)
 	}
-}
+	time.Sleep(3 * time.Second)
 
-func TestCreateProject(t *testing.T) {
-	TestCreateWorkspace(t)
-
-	projectReq := &daytona_provider.ProjectRequest{
-		TargetOptions: optionsString,
-		Project:       project1,
+	_, err = hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
+	if err == nil {
+		t.Fatalf("Error destroyed workspace still exists")
 	}
-
-	_, err := sampleProvider.CreateProject(projectReq)
-	if err != nil {
-		t.Errorf("Error creating project: %s", err)
-	}
-}
-
-func TestDestroyProject(t *testing.T) {
-	projectReq := &daytona_provider.ProjectRequest{
-		TargetOptions: optionsString,
-		Project:       project1,
-	}
-
-	_, err := sampleProvider.DestroyProject(projectReq)
-	if err != nil {
-		t.Errorf("Error deleting project: %s", err)
-	}
-
-	TestDestroyWorkspace(t)
 }
 
 func init() {
-	_, err := sampleProvider.Initialize(daytona_provider.InitializeProviderRequest{
+	_, err := hetznerProvider.Initialize(provider.InitializeProviderRequest{
 		BasePath:           "/tmp/workspaces",
-		DaytonaDownloadUrl: "https://download.daytona.io/daytona/get-server.sh",
+		DaytonaDownloadUrl: "https://download.daytona.io/daytona/install.sh",
 		DaytonaVersion:     "latest",
 		ServerUrl:          "",
 		ApiUrl:             "",
-		ServerPort:         0,
-		ApiPort:            0,
 		LogsDir:            "/tmp/logs",
 	})
 	if err != nil {
@@ -141,5 +132,11 @@ func init() {
 		panic(err)
 	}
 
-	optionsString = string(opts)
+	workspaceReq = &provider.WorkspaceRequest{
+		TargetOptions: string(opts),
+		Workspace: &workspace.Workspace{
+			Id:   "123",
+			Name: "workspace",
+		},
+	}
 }

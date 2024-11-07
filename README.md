@@ -11,7 +11,6 @@
 <div align="center">
 This repository is the home of the <a href="https://github.com/daytonaio/daytona">Daytona</a> Hetzner Provider.
 </div>
-</br>
 
 <p align="center">
   <a href="https://github.com/daytonaio/daytona-provider-hetzner/issues/new?assignees=&labels=bug&projects=&template=bug_report.md&title=%F0%9F%90%9B+Bug+Report%3A+">Report Bug</a>
@@ -23,25 +22,24 @@ This repository is the home of the <a href="https://github.com/daytonaio/daytona
   <a href="https://x.com/Daytonaio">X</a>
 </p>
 
-> [!TIP]
-> Write a description of your Provider here.
+The Hetzner Provider allows Daytona to create and manage workspace projects on Hetzner Cloud server.
+
+
+Detailed instructions on generating API token can be found [here](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
 
 ## Target Options
 
-| Property        | Type     | Optional | DefaultValue            | InputMasked | DisabledPredicate |
-| --------------- | -------- | -------- | ----------------------- | ----------- | ----------------- |
-| Required String | String   | false    | default-required-string | false       |                   |
-| Optional String | String   | true     |                         | true        |                   |
-| Optional Int    | Int      | true     |                         | false       |                   |
-| FilePath        | FilePath | true     | ~/.ssh                  | false       | ^default-target$  |
+| Property    | Type   | Optional | DefaultValue | InputMasked | DisabledPredicate |
+|-------------|--------|----------|--------------|-------------|-------------------|
+| Location    | String | true     | fsn1         | false       |                   |
+| Disk Image  | String | true     | ubuntu-24.04 | false       |                   |
+| Disk Size   | Int    | true     | 20           | false       |                   |
+| Server Type | String | true     | cpx11        | false       |                   |
+| API Token   | String | false    |              | true        |                   |
 
 ### Default Targets
 
-#### Local
-
-| Property        | Value                   |
-| --------------- | ----------------------- |
-| Required String | default-required-string |
+The Hetzner Provider has no preset targets. Before using the provider you must set the target using the daytona target set command.
 
 ## Code of Conduct
 
