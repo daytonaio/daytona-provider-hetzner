@@ -16,6 +16,7 @@ import (
 	"github.com/daytonaio/daytona/pkg/docker"
 	"github.com/daytonaio/daytona/pkg/ssh"
 	"github.com/daytonaio/daytona/pkg/tailscale"
+	"github.com/hetznercloud/hcloud-go/hcloud"
 	"tailscale.com/tsnet"
 
 	"github.com/daytonaio/daytona/pkg/logs"
@@ -55,6 +56,7 @@ func (h *HetznerProvider) Initialize(req provider.InitializeProviderRequest) (*u
 func (h *HetznerProvider) GetInfo() (provider.ProviderInfo, error) {
 	return provider.ProviderInfo{
 		Name:    "hetzner-provider",
+		Label:   hcloud.Ptr("Hetzner"),
 		Version: internal.Version,
 	}, nil
 }
