@@ -357,6 +357,11 @@ func (h *HetznerProvider) getProjectLogWriter(workspaceId string, projectName st
 	return logWriter, cleanupFunc
 }
 
+func (h *HetznerProvider) CheckRequirements() (*[]provider.RequirementStatus, error) {
+	results := []provider.RequirementStatus{}
+	return &results, nil
+}
+
 func getWorkspaceDir(workspaceId string) string {
 	return fmt.Sprintf("/home/daytona/%s", workspaceId)
 }
