@@ -9,12 +9,12 @@ import (
 
 	logwriters "github.com/daytonaio/daytona-provider-hetzner/internal/log"
 	"github.com/daytonaio/daytona-provider-hetzner/pkg/types"
-	"github.com/daytonaio/daytona/pkg/workspace"
+	"github.com/daytonaio/daytona/pkg/models"
 	"github.com/hetznercloud/hcloud-go/hcloud"
 )
 
-func CreateWorkspace(workspace *workspace.Workspace, opts *types.TargetOptions, initScript string, logWriter io.Writer) error {
-	envVars := workspace.EnvVars
+func CreateTarget(target *models.Target, opts *types.TargetOptions, initScript string, logWriter io.Writer) error {
+	envVars := target.EnvVars
 	envVars["DAYTONA_AGENT_LOG_FILE_PATH"] = "/home/daytona/.daytona-agent.log"
 
 	customData := `#!/bin/bash
@@ -64,7 +64,7 @@ After=network.target
 
 [Service]
 User=daytona
-ExecStart=/usr/local/bin/daytona agent --host
+ExecStart=/usr/local/bin/daytona agent --target
 Restart=always
 `
 
@@ -79,13 +79,13 @@ systemctl daemon-reload
 systemctl enable daytona-agent.service
 systemctl start daytona-agent.service
 `
-	return createServer(workspace.Id, customData, opts, logWriter)
+	return createServer(target.Id, customData, opts, logWriter)
 }
 
-func StartWorkspace(workspace *workspace.Workspace, opts *types.TargetOptions) error {
+func StartTarget(target *models.Target, opts *types.TargetOptions) error {
 	client := hcloud.NewClient(hcloud.WithToken(opts.APIToken))
 
-	server, err := GetServer(workspace, opts)
+	server, err := GetServer(target, opts)
 	if err != nil {
 		return err
 	}
@@ -102,10 +102,10 @@ func StartWorkspace(workspace *workspace.Workspace, opts *types.TargetOptions) e
 	return action.Error()
 }
 
-func StopWorkspace(workspace *workspace.Workspace, opts *types.TargetOptions) error {
+func StopTarget(target *models.Target, opts *types.TargetOptions) error {
 	client := hcloud.NewClient(hcloud.WithToken(opts.APIToken))
 
-	server, err := GetServer(workspace, opts)
+	server, err := GetServer(target, opts)
 	if err != nil {
 		return err
 	}
@@ -122,10 +122,10 @@ func StopWorkspace(workspace *workspace.Workspace, opts *types.TargetOptions) er
 	return action.Error()
 }
 
-func DeleteWorkspace(workspace *workspace.Workspace, opts *types.TargetOptions) error {
+func DeleteTarget(target *models.Target, opts *types.TargetOptions) error {
 	client := hcloud.NewClient(hcloud.WithToken(opts.APIToken))
 
-	server, err := GetServer(workspace, opts)
+	server, err := GetServer(target, opts)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func DeleteWorkspace(workspace *workspace.Workspace, opts *types.TargetOptions) 
 }
 
 // createServer creates a new Hetzner server and volume.
-func createServer(workspaceId, customData string, opts *types.TargetOptions, logWriter io.Writer) error {
+func createServer(targetId, customData string, opts *types.TargetOptions, logWriter io.Writer) error {
 	client := hcloud.NewClient(hcloud.WithToken(opts.APIToken))
 
 	location, _, err := client.Location.GetByName(context.Background(), opts.Location)
@@ -162,7 +162,7 @@ func createServer(workspaceId, customData string, opts *types.TargetOptions, log
 	spinner := logwriters.ShowSpinner(logWriter, "Creating Hetzner volume", "Hetzner volume created")
 	volume, _, err := client.Volume.Create(context.Background(), hcloud.VolumeCreateOpts{
 		Location: location,
-		Name:     fmt.Sprintf("daytona-%s", workspaceId),
+		Name:     fmt.Sprintf("daytona-%s", targetId),
 		Size:     opts.DiskSize,
 		Format:   hcloud.Ptr("ext4"),
 	})
@@ -191,7 +191,7 @@ func createServer(workspaceId, customData string, opts *types.TargetOptions, log
 	}
 
 	_, _, err = client.Server.Create(context.Background(), hcloud.ServerCreateOpts{
-		Name:             fmt.Sprintf("daytona-%s", workspaceId),
+		Name:             fmt.Sprintf("daytona-%s", targetId),
 		ServerType:       serverType,
 		Image:            image,
 		Location:         location,
@@ -204,9 +204,9 @@ func createServer(workspaceId, customData string, opts *types.TargetOptions, log
 }
 
 // GetServer returns the virtual machine instance for the given workspace.
-func GetServer(workspace *workspace.Workspace, opts *types.TargetOptions) (*hcloud.Server, error) {
+func GetServer(target *models.Target, opts *types.TargetOptions) (*hcloud.Server, error) {
 	client := hcloud.NewClient(hcloud.WithToken(opts.APIToken))
-	server, _, s := client.Server.GetByName(context.Background(), fmt.Sprintf("daytona-%s", workspace.Id))
+	server, _, s := client.Server.GetByName(context.Background(), fmt.Sprintf("daytona-%s", target.Id))
 	if s != nil {
 		return nil, s
 	}
