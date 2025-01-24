@@ -4,7 +4,7 @@ import (
 	"github.com/hetznercloud/hcloud-go/hcloud"
 )
 
-type WorkspaceMetadata struct {
+type TargetMetadata struct {
 	ServerID     int
 	ServerName   string
 	ServerMemory float32
@@ -13,9 +13,9 @@ type WorkspaceMetadata struct {
 	Created      string
 }
 
-// ToWorkspaceMetadata converts and maps values from an *hcloud.Server to a WorkspaceMetadata.
-func ToWorkspaceMetadata(server *hcloud.Server) WorkspaceMetadata {
-	return WorkspaceMetadata{
+// ToTargetMetadata converts and maps values from an *hcloud.Server to a WorkspaceMetadata.
+func ToTargetMetadata(server *hcloud.Server) TargetMetadata {
+	return TargetMetadata{
 		ServerID:     server.ID,
 		ServerName:   server.Name,
 		ServerMemory: server.ServerType.Memory,

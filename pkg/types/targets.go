@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/daytonaio/daytona/pkg/provider"
+	"github.com/daytonaio/daytona/pkg/models"
 )
 
 type TargetOptions struct {
@@ -16,36 +16,36 @@ type TargetOptions struct {
 	APIToken   string `json:"API Token"`
 }
 
-func GetTargetManifest() *provider.ProviderTargetManifest {
-	return &provider.ProviderTargetManifest{
-		"Location": provider.ProviderTargetProperty{
-			Type: provider.ProviderTargetPropertyTypeString,
+func GetTargetConfigManifest() *models.TargetConfigManifest {
+	return &models.TargetConfigManifest{
+		"Location": models.TargetConfigProperty{
+			Type: models.TargetConfigPropertyTypeString,
 			Description: "The locations where the resources will be created. Default is fsn1.\n" +
 				"https://docs.hetzner.com/cloud/general/locations",
 			DefaultValue: "fsn1",
 			Suggestions:  locations,
 		},
-		"Disk Image": provider.ProviderTargetProperty{
-			Type: provider.ProviderTargetPropertyTypeString,
+		"Disk Image": models.TargetConfigProperty{
+			Type: models.TargetConfigPropertyTypeString,
 			Description: "The Hetzner image to use for the VM. Default is ubuntu-24.04.\n" +
 				"https://docs.hetzner.com/robot/dedicated-server/operating-systems/standard-images",
 			DefaultValue: "ubuntu-24.04",
 			Suggestions:  diskImages,
 		},
-		"Disk Size": provider.ProviderTargetProperty{
-			Type:         provider.ProviderTargetPropertyTypeInt,
+		"Disk Size": models.TargetConfigProperty{
+			Type:         models.TargetConfigPropertyTypeInt,
 			Description:  "The size of the instance volume, in GB. Default is 20 GB.",
 			DefaultValue: "20",
 		},
-		"Server Type": provider.ProviderTargetProperty{
-			Type: provider.ProviderTargetPropertyTypeString,
+		"Server Type": models.TargetConfigProperty{
+			Type: models.TargetConfigPropertyTypeString,
 			Description: "The Hetzner server type to use for the VM. Default is List cpx11.\n" +
 				"https://docs.hetzner.com/cloud/servers/overview",
 			DefaultValue: "cpx11",
 			Suggestions:  serverTypes,
 		},
-		"API Token": provider.ProviderTargetProperty{
-			Type:        provider.ProviderTargetPropertyTypeString,
+		"API Token": models.TargetConfigProperty{
+			Type:        models.TargetConfigPropertyTypeString,
 			InputMasked: true,
 			Description: "If empty, token will be fetched from the HETZNER_API_TOKEN environment variable.",
 		},

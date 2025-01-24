@@ -14,6 +14,7 @@ import (
 	"github.com/daytonaio/daytona-provider-hetzner/pkg/types"
 	"github.com/daytonaio/daytona/pkg/agent/ssh/config"
 	"github.com/daytonaio/daytona/pkg/docker"
+	"github.com/daytonaio/daytona/pkg/models"
 	"github.com/daytonaio/daytona/pkg/ssh"
 	"github.com/daytonaio/daytona/pkg/tailscale"
 	"github.com/hetznercloud/hcloud-go/hcloud"
@@ -22,8 +23,6 @@ import (
 	"github.com/daytonaio/daytona/pkg/logs"
 	"github.com/daytonaio/daytona/pkg/provider"
 	"github.com/daytonaio/daytona/pkg/provider/util"
-	"github.com/daytonaio/daytona/pkg/workspace"
-	"github.com/daytonaio/daytona/pkg/workspace/project"
 )
 
 type HetznerProvider struct {
@@ -33,9 +32,11 @@ type HetznerProvider struct {
 	ServerUrl          *string
 	NetworkKey         *string
 	ApiUrl             *string
+	ApiKey             *string
 	ApiPort            *uint32
 	ServerPort         *uint32
-	LogsDir            *string
+	WorkspaceLogsDir   *string
+	TargetLogsDir      *string
 	tsnetConn          *tsnet.Server
 }
 
@@ -46,66 +47,65 @@ func (h *HetznerProvider) Initialize(req provider.InitializeProviderRequest) (*u
 	h.ServerUrl = &req.ServerUrl
 	h.NetworkKey = &req.NetworkKey
 	h.ApiUrl = &req.ApiUrl
+	h.ApiKey = req.ApiKey
 	h.ApiPort = &req.ApiPort
 	h.ServerPort = &req.ServerPort
-	h.LogsDir = &req.LogsDir
+	h.WorkspaceLogsDir = &req.WorkspaceLogsDir
+	h.TargetLogsDir = &req.TargetLogsDir
 
 	return new(util.Empty), nil
 }
 
-func (h *HetznerProvider) GetInfo() (provider.ProviderInfo, error) {
-	return provider.ProviderInfo{
-		Name:    "hetzner-provider",
-		Label:   hcloud.Ptr("Hetzner"),
-		Version: internal.Version,
+func (h *HetznerProvider) GetInfo() (models.ProviderInfo, error) {
+	return models.ProviderInfo{
+		Name:                 "hetzner-provider",
+		Label:                hcloud.Ptr("Hetzner"),
+		Version:              internal.Version,
+		TargetConfigManifest: *types.GetTargetConfigManifest(),
 	}, nil
 }
 
-func (h *HetznerProvider) GetTargetManifest() (*provider.ProviderTargetManifest, error) {
-	return types.GetTargetManifest(), nil
+func (h *HetznerProvider) GetPresetTargetConfigs() (*[]provider.TargetConfig, error) {
+	return new([]provider.TargetConfig), nil
 }
 
-func (h *HetznerProvider) GetPresetTargets() (*[]provider.ProviderTarget, error) {
-	return new([]provider.ProviderTarget), nil
-}
-
-func (h *HetznerProvider) CreateWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
+func (h *HetznerProvider) CreateTarget(targetReq *provider.TargetRequest) (*util.Empty, error) {
 	if h.DaytonaDownloadUrl == nil {
 		return nil, errors.New("DaytonaDownloadUrl not set. Did you forget to call Initialize")
 	}
-	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id)
+	logWriter, cleanupFunc := h.getTargetLogWriter(targetReq.Target.Id, targetReq.Target.Name)
 	defer cleanupFunc()
 
-	targetOptions, err := types.ParseTargetOptions(workspaceReq.TargetOptions)
+	targetOptions, err := types.ParseTargetOptions(targetReq.Target.TargetConfig.Options)
 	if err != nil {
-		logWriter.Write([]byte("Failed to parse target options: " + err.Error() + "\n"))
+		logWriter.Write([]byte("Failed to parse target config options: " + err.Error() + "\n"))
 		return nil, err
 	}
 
-	initScript := fmt.Sprintf(`curl -sfL -H "Authorization: Bearer %s" %s | bash`, workspaceReq.Workspace.ApiKey, *h.DaytonaDownloadUrl)
-	err = hetznerutil.CreateWorkspace(workspaceReq.Workspace, targetOptions, initScript, logWriter)
+	initScript := fmt.Sprintf(`curl -sfL -H "Authorization: Bearer %s" %s | bash`, targetReq.Target.ApiKey, *h.DaytonaDownloadUrl)
+	err = hetznerutil.CreateTarget(targetReq.Target, targetOptions, initScript, logWriter)
 	if err != nil {
-		logWriter.Write([]byte("Failed to create workspace: " + err.Error() + "\n"))
+		logWriter.Write([]byte("Failed to create target: " + err.Error() + "\n"))
 		return nil, err
 	}
 
 	agentSpinner := logwriters.ShowSpinner(logWriter, "Waiting for the agent to start", "Agent started")
-	err = h.waitForDial(workspaceReq.Workspace.Id, 10*time.Minute)
+	err = h.waitForDial(targetReq.Target.Id, 10*time.Minute)
 	close(agentSpinner)
 	if err != nil {
 		logWriter.Write([]byte("Failed to dial: " + err.Error() + "\n"))
 		return nil, err
 	}
 
-	client, err := h.getDockerClient(workspaceReq.Workspace.Id)
+	client, err := h.getDockerClient(targetReq.Target.Id)
 	if err != nil {
 		logWriter.Write([]byte("Failed to get client: " + err.Error() + "\n"))
 		return nil, err
 	}
 
-	workspaceDir := getWorkspaceDir(workspaceReq.Workspace.Id)
+	targetDir := getTargetDir(targetReq.Target.Id)
 	sshClient, err := tailscale.NewSshClient(h.tsnetConn, &ssh.SessionConfig{
-		Hostname: workspaceReq.Workspace.Id,
+		Hostname: targetReq.Target.Id,
 		Port:     config.SSH_PORT,
 	})
 	if err != nil {
@@ -114,89 +114,93 @@ func (h *HetznerProvider) CreateWorkspace(workspaceReq *provider.WorkspaceReques
 	}
 	defer sshClient.Close()
 
-	return new(util.Empty), client.CreateWorkspace(workspaceReq.Workspace, workspaceDir, logWriter, sshClient)
+	return new(util.Empty), client.CreateTarget(targetReq.Target, targetDir, logWriter, sshClient)
 }
 
-func (h *HetznerProvider) StartWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
-	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id)
+func (h *HetznerProvider) StartTarget(targetReq *provider.TargetRequest) (*util.Empty, error) {
+	logWriter, cleanupFunc := h.getTargetLogWriter(targetReq.Target.Id, targetReq.Target.Name)
 	defer cleanupFunc()
 
-	targetOptions, err := types.ParseTargetOptions(workspaceReq.TargetOptions)
+	targetOptions, err := types.ParseTargetOptions(targetReq.Target.TargetConfig.Options)
 	if err != nil {
-		logWriter.Write([]byte("Failed to parse target options: " + err.Error() + "\n"))
+		logWriter.Write([]byte("Failed to parse target config options: " + err.Error() + "\n"))
 		return nil, err
 	}
 
-	err = h.waitForDial(workspaceReq.Workspace.Id, 10*time.Minute)
+	err = h.waitForDial(targetReq.Target.Id, 10*time.Minute)
 	if err != nil {
 		logWriter.Write([]byte("Failed to dial: " + err.Error() + "\n"))
 		return nil, err
 	}
 
-	return new(util.Empty), hetznerutil.StartWorkspace(workspaceReq.Workspace, targetOptions)
+	return new(util.Empty), hetznerutil.StartTarget(targetReq.Target, targetOptions)
 }
 
-func (h *HetznerProvider) StopWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
-	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id)
+func (h *HetznerProvider) StopTarget(targetReq *provider.TargetRequest) (*util.Empty, error) {
+	logWriter, cleanupFunc := h.getTargetLogWriter(targetReq.Target.Id, targetReq.Target.Name)
 	defer cleanupFunc()
 
-	targetOptions, err := types.ParseTargetOptions(workspaceReq.TargetOptions)
+	targetOptions, err := types.ParseTargetOptions(targetReq.Target.TargetConfig.Options)
 	if err != nil {
-		logWriter.Write([]byte("Failed to parse target options: " + err.Error() + "\n"))
+		logWriter.Write([]byte("Failed to parse target config options: " + err.Error() + "\n"))
 		return nil, err
 	}
 
-	return new(util.Empty), hetznerutil.StopWorkspace(workspaceReq.Workspace, targetOptions)
+	return new(util.Empty), hetznerutil.StopTarget(targetReq.Target, targetOptions)
 }
 
-func (h *HetznerProvider) DestroyWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
-	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id)
+func (h *HetznerProvider) DestroyTarget(targetReq *provider.TargetRequest) (*util.Empty, error) {
+	logWriter, cleanupFunc := h.getTargetLogWriter(targetReq.Target.Id, targetReq.Target.Name)
 	defer cleanupFunc()
 
-	targetOptions, err := types.ParseTargetOptions(workspaceReq.TargetOptions)
+	targetOptions, err := types.ParseTargetOptions(targetReq.Target.TargetConfig.Options)
+	if err != nil {
+		logWriter.Write([]byte("Failed to parse target config options: " + err.Error() + "\n"))
+		return nil, err
+	}
+
+	return new(util.Empty), hetznerutil.DeleteTarget(targetReq.Target, targetOptions)
+}
+
+func (h *HetznerProvider) GetTargetProviderMetadata(targetReq *provider.TargetRequest) (string, error) {
+	logWriter, cleanupFunc := h.getTargetLogWriter(targetReq.Target.Id, targetReq.Target.Name)
+	defer cleanupFunc()
+
+	targetOptions, err := types.ParseTargetOptions(targetReq.Target.TargetConfig.Options)
 	if err != nil {
 		logWriter.Write([]byte("Failed to parse target options: " + err.Error() + "\n"))
-		return nil, err
+		return "", err
 	}
 
-	return new(util.Empty), hetznerutil.DeleteWorkspace(workspaceReq.Workspace, targetOptions)
-}
-
-func (h *HetznerProvider) GetWorkspaceInfo(workspaceReq *provider.WorkspaceRequest) (*workspace.WorkspaceInfo, error) {
-	workspaceInfo, err := h.getWorkspaceInfo(workspaceReq)
+	server, err := hetznerutil.GetServer(targetReq.Target, targetOptions)
 	if err != nil {
-		return nil, err
+		logWriter.Write([]byte("Failed to get machine: " + err.Error() + "\n"))
+		return "", err
+
 	}
 
-	var projectInfos []*project.ProjectInfo
-	for _, project := range workspaceReq.Workspace.Projects {
-		projectInfo, err := h.GetProjectInfo(&provider.ProjectRequest{
-			TargetOptions: workspaceReq.TargetOptions,
-			Project:       project,
-		})
-		if err != nil {
-			return nil, err
-		}
-		projectInfos = append(projectInfos, projectInfo)
+	metadata := types.ToTargetMetadata(server)
+	jsonMetadata, err := json.Marshal(metadata)
+	if err != nil {
+		return "", err
 	}
-	workspaceInfo.Projects = projectInfos
 
-	return workspaceInfo, nil
+	return string(jsonMetadata), nil
 }
 
-func (h *HetznerProvider) CreateProject(projectReq *provider.ProjectRequest) (*util.Empty, error) {
-	logWriter, cleanupFunc := h.getProjectLogWriter(projectReq.Project.WorkspaceId, projectReq.Project.Name)
+func (h *HetznerProvider) CreateWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
+	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id, workspaceReq.Workspace.Name)
 	defer cleanupFunc()
 	logWriter.Write([]byte("\033[?25h\n"))
 
-	dockerClient, err := h.getDockerClient(projectReq.Project.WorkspaceId)
+	dockerClient, err := h.getDockerClient(workspaceReq.Workspace.Target.Id)
 	if err != nil {
 		logWriter.Write([]byte("Failed to get docker client: " + err.Error() + "\n"))
 		return nil, err
 	}
 
 	sshClient, err := tailscale.NewSshClient(h.tsnetConn, &ssh.SessionConfig{
-		Hostname: projectReq.Project.WorkspaceId,
+		Hostname: workspaceReq.Workspace.Target.Id,
 		Port:     config.SSH_PORT,
 	})
 	if err != nil {
@@ -205,33 +209,31 @@ func (h *HetznerProvider) CreateProject(projectReq *provider.ProjectRequest) (*u
 	}
 	defer sshClient.Close()
 
-	return new(util.Empty), dockerClient.CreateProject(&docker.CreateProjectOptions{
-		Project:                  projectReq.Project,
-		ProjectDir:               getProjectDir(projectReq),
-		ContainerRegistry:        projectReq.ContainerRegistry,
-		BuilderImage:             projectReq.BuilderImage,
-		BuilderContainerRegistry: projectReq.BuilderContainerRegistry,
-		LogWriter:                logWriter,
-		Gpc:                      projectReq.GitProviderConfig,
-		SshClient:                sshClient,
+	return new(util.Empty), dockerClient.CreateWorkspace(&docker.CreateWorkspaceOptions{Workspace: workspaceReq.Workspace,
+		WorkspaceDir:        getWorkspaceDir(workspaceReq),
+		ContainerRegistries: workspaceReq.ContainerRegistries,
+		BuilderImage:        workspaceReq.BuilderImage,
+		LogWriter:           logWriter,
+		Gpc:                 workspaceReq.GitProviderConfig,
+		SshClient:           sshClient,
 	})
 }
 
-func (h *HetznerProvider) StartProject(projectReq *provider.ProjectRequest) (*util.Empty, error) {
+func (h *HetznerProvider) StartWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
 	if h.DaytonaDownloadUrl == nil {
 		return nil, errors.New("DaytonaDownloadUrl not set. Did you forget to call Initialize")
 	}
-	logWriter, cleanupFunc := h.getProjectLogWriter(projectReq.Project.WorkspaceId, projectReq.Project.Name)
+	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id, workspaceReq.Workspace.Name)
 	defer cleanupFunc()
 
-	dockerClient, err := h.getDockerClient(projectReq.Project.WorkspaceId)
+	dockerClient, err := h.getDockerClient(workspaceReq.Workspace.Target.Id)
 	if err != nil {
 		logWriter.Write([]byte("Failed to get docker client: " + err.Error() + "\n"))
 		return nil, err
 	}
 
 	sshClient, err := tailscale.NewSshClient(h.tsnetConn, &ssh.SessionConfig{
-		Hostname: projectReq.Project.WorkspaceId,
+		Hostname: workspaceReq.Workspace.Target.Id,
 		Port:     config.SSH_PORT,
 	})
 	if err != nil {
@@ -240,43 +242,42 @@ func (h *HetznerProvider) StartProject(projectReq *provider.ProjectRequest) (*ut
 	}
 	defer sshClient.Close()
 
-	return new(util.Empty), dockerClient.StartProject(&docker.CreateProjectOptions{
-		Project:                  projectReq.Project,
-		ProjectDir:               getProjectDir(projectReq),
-		ContainerRegistry:        projectReq.ContainerRegistry,
-		BuilderImage:             projectReq.BuilderImage,
-		BuilderContainerRegistry: projectReq.BuilderContainerRegistry,
-		LogWriter:                logWriter,
-		Gpc:                      projectReq.GitProviderConfig,
-		SshClient:                sshClient,
+	return new(util.Empty), dockerClient.StartWorkspace(&docker.CreateWorkspaceOptions{
+		Workspace:           workspaceReq.Workspace,
+		WorkspaceDir:        getWorkspaceDir(workspaceReq),
+		ContainerRegistries: workspaceReq.ContainerRegistries,
+		BuilderImage:        workspaceReq.BuilderImage,
+		LogWriter:           logWriter,
+		Gpc:                 workspaceReq.GitProviderConfig,
+		SshClient:           sshClient,
 	}, *h.DaytonaDownloadUrl)
 }
 
-func (h *HetznerProvider) StopProject(projectReq *provider.ProjectRequest) (*util.Empty, error) {
-	logWriter, cleanupFunc := h.getProjectLogWriter(projectReq.Project.WorkspaceId, projectReq.Project.Name)
+func (h *HetznerProvider) StopWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
+	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id, workspaceReq.Workspace.Name)
 	defer cleanupFunc()
 
-	dockerClient, err := h.getDockerClient(projectReq.Project.WorkspaceId)
+	dockerClient, err := h.getDockerClient(workspaceReq.Workspace.Target.Id)
 	if err != nil {
 		logWriter.Write([]byte("Failed to get docker client: " + err.Error() + "\n"))
 		return nil, err
 	}
 
-	return new(util.Empty), dockerClient.StopProject(projectReq.Project, logWriter)
+	return new(util.Empty), dockerClient.StopWorkspace(workspaceReq.Workspace, logWriter)
 }
 
-func (h *HetznerProvider) DestroyProject(projectReq *provider.ProjectRequest) (*util.Empty, error) {
-	logWriter, cleanupFunc := h.getProjectLogWriter(projectReq.Project.WorkspaceId, projectReq.Project.Name)
+func (h *HetznerProvider) DestroyWorkspace(workspaceReq *provider.WorkspaceRequest) (*util.Empty, error) {
+	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id, workspaceReq.Workspace.Name)
 	defer cleanupFunc()
 
-	dockerClient, err := h.getDockerClient(projectReq.Project.WorkspaceId)
+	dockerClient, err := h.getDockerClient(workspaceReq.Workspace.Target.Id)
 	if err != nil {
 		logWriter.Write([]byte("Failed to get docker client: " + err.Error() + "\n"))
 		return nil, err
 	}
 
 	sshClient, err := tailscale.NewSshClient(h.tsnetConn, &ssh.SessionConfig{
-		Hostname: projectReq.Project.WorkspaceId,
+		Hostname: workspaceReq.Workspace.Target.Id,
 		Port:     config.SSH_PORT,
 	})
 	if err != nil {
@@ -285,73 +286,59 @@ func (h *HetznerProvider) DestroyProject(projectReq *provider.ProjectRequest) (*
 	}
 	defer sshClient.Close()
 
-	return new(util.Empty), dockerClient.DestroyProject(projectReq.Project, getProjectDir(projectReq), sshClient)
+	return new(util.Empty), dockerClient.DestroyWorkspace(workspaceReq.Workspace, getWorkspaceDir(workspaceReq), sshClient)
 }
 
-func (h *HetznerProvider) GetProjectInfo(projectReq *provider.ProjectRequest) (*project.ProjectInfo, error) {
-	logWriter, cleanupFunc := h.getProjectLogWriter(projectReq.Project.WorkspaceId, projectReq.Project.Name)
+func (h *HetznerProvider) GetWorkspaceProviderMetadata(workspaceReq *provider.WorkspaceRequest) (string, error) {
+	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id, workspaceReq.Workspace.Name)
 	defer cleanupFunc()
 
-	dockerClient, err := h.getDockerClient(projectReq.Project.WorkspaceId)
+	dockerClient, err := h.getDockerClient(workspaceReq.Workspace.Target.Id)
 	if err != nil {
 		logWriter.Write([]byte("Failed to get docker client: " + err.Error() + "\n"))
-		return nil, err
+		return "", err
 	}
 
-	return dockerClient.GetProjectInfo(projectReq.Project)
+	return dockerClient.GetWorkspaceProviderMetadata(workspaceReq.Workspace)
 }
 
-func (h *HetznerProvider) getWorkspaceInfo(workspaceReq *provider.WorkspaceRequest) (*workspace.WorkspaceInfo, error) {
-	logWriter, cleanupFunc := h.getWorkspaceLogWriter(workspaceReq.Workspace.Id)
-	defer cleanupFunc()
-
-	targetOptions, err := types.ParseTargetOptions(workspaceReq.TargetOptions)
-	if err != nil {
-		logWriter.Write([]byte("Failed to parse target options: " + err.Error() + "\n"))
-		return nil, err
-	}
-
-	server, err := hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
-	if err != nil {
-		logWriter.Write([]byte("Failed to get server: " + err.Error() + "\n"))
-		return nil, err
-	}
-
-	metadata := types.ToWorkspaceMetadata(server)
-	jsonMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return nil, err
-	}
-
-	return &workspace.WorkspaceInfo{
-		Name:             workspaceReq.Workspace.Name,
-		ProviderMetadata: string(jsonMetadata),
-	}, nil
-}
-
-func (h *HetznerProvider) getWorkspaceLogWriter(workspaceId string) (io.Writer, func()) {
+func (h *HetznerProvider) getWorkspaceLogWriter(workspaceId, workspaceName string) (io.Writer, func()) {
 	logWriter := io.MultiWriter(&logwriters.InfoLogWriter{})
 	cleanupFunc := func() {}
 
-	if h.LogsDir != nil {
-		loggerFactory := logs.NewLoggerFactory(h.LogsDir, nil)
-		wsLogWriter := loggerFactory.CreateWorkspaceLogger(workspaceId, logs.LogSourceProvider)
-		logWriter = io.MultiWriter(&logwriters.InfoLogWriter{}, wsLogWriter)
-		cleanupFunc = func() { wsLogWriter.Close() }
+	if h.WorkspaceLogsDir != nil {
+		loggerFactory := logs.NewLoggerFactory(logs.LoggerFactoryConfig{
+			LogsDir:     *h.WorkspaceLogsDir,
+			ApiUrl:      h.ApiUrl,
+			ApiKey:      h.ApiKey,
+			ApiBasePath: &logs.ApiBasePathWorkspace,
+		})
+		workspaceLogWriter, err := loggerFactory.CreateLogger(workspaceId, workspaceName, logs.LogSourceProvider)
+		if err == nil {
+			logWriter = io.MultiWriter(&logwriters.InfoLogWriter{}, workspaceLogWriter)
+			cleanupFunc = func() { workspaceLogWriter.Close() }
+		}
 	}
 
 	return logWriter, cleanupFunc
 }
 
-func (h *HetznerProvider) getProjectLogWriter(workspaceId string, projectName string) (io.Writer, func()) {
+func (h *HetznerProvider) getTargetLogWriter(targetId, targetName string) (io.Writer, func()) {
 	logWriter := io.MultiWriter(&logwriters.InfoLogWriter{})
 	cleanupFunc := func() {}
 
-	if h.LogsDir != nil {
-		loggerFactory := logs.NewLoggerFactory(h.LogsDir, nil)
-		projectLogWriter := loggerFactory.CreateProjectLogger(workspaceId, projectName, logs.LogSourceProvider)
-		logWriter = io.MultiWriter(&logwriters.InfoLogWriter{}, projectLogWriter)
-		cleanupFunc = func() { projectLogWriter.Close() }
+	if h.TargetLogsDir != nil {
+		loggerFactory := logs.NewLoggerFactory(logs.LoggerFactoryConfig{
+			LogsDir:     *h.TargetLogsDir,
+			ApiUrl:      h.ApiUrl,
+			ApiKey:      h.ApiKey,
+			ApiBasePath: &logs.ApiBasePathTarget,
+		})
+		targetLogWriter, err := loggerFactory.CreateLogger(targetId, targetName, logs.LogSourceProvider)
+		if err == nil {
+			logWriter = io.MultiWriter(&logwriters.InfoLogWriter{}, targetLogWriter)
+			cleanupFunc = func() { targetLogWriter.Close() }
+		}
 	}
 
 	return logWriter, cleanupFunc
@@ -362,13 +349,14 @@ func (h *HetznerProvider) CheckRequirements() (*[]provider.RequirementStatus, er
 	return &results, nil
 }
 
-func getWorkspaceDir(workspaceId string) string {
-	return fmt.Sprintf("/home/daytona/%s", workspaceId)
+func getWorkspaceDir(workspaceReq *provider.WorkspaceRequest) string {
+	return path.Join(
+		getTargetDir(workspaceReq.Workspace.TargetId),
+		workspaceReq.Workspace.Id,
+		workspaceReq.Workspace.WorkspaceFolderName(),
+	)
 }
 
-func getProjectDir(projectReq *provider.ProjectRequest) string {
-	return path.Join(
-		getWorkspaceDir(projectReq.Project.WorkspaceId),
-		fmt.Sprintf("%s-%s", projectReq.Project.WorkspaceId, projectReq.Project.Name),
-	)
+func getTargetDir(targetId string) string {
+	return fmt.Sprintf("/home/daytona/%s", targetId)
 }

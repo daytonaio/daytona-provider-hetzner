@@ -6,9 +6,9 @@ import (
 )
 
 func TestGetTargetManifest(t *testing.T) {
-	targetManifest := GetTargetManifest()
+	targetManifest := GetTargetConfigManifest()
 	if targetManifest == nil {
-		t.Fatalf("Expected target manifest but got nil")
+		t.Fatalf("Expected target config manifest but got nil")
 	}
 
 	fields := [5]string{"Location", "Disk Image", "Disk Size", "Server Type", "API Token"}

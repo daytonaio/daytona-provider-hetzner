@@ -32,7 +32,7 @@ func (h *HetznerProvider) getTsnetConn() (*tsnet.Server, error) {
 	return h.tsnetConn, nil
 }
 
-func (h *HetznerProvider) waitForDial(workspaceId string, dialTimeout time.Duration) error {
+func (h *HetznerProvider) waitForDial(targetId string, dialTimeout time.Duration) error {
 	tsnetConn, err := h.getTsnetConn()
 	if err != nil {
 		return err
@@ -44,7 +44,7 @@ func (h *HetznerProvider) waitForDial(workspaceId string, dialTimeout time.Durat
 			return fmt.Errorf("timeout: dialing timed out after %f minutes", dialTimeout.Minutes())
 		}
 
-		dialConn, err := tsnetConn.Dial(context.Background(), "tcp", fmt.Sprintf("%s:%d", workspaceId, config.SSH_PORT))
+		dialConn, err := tsnetConn.Dial(context.Background(), "tcp", fmt.Sprintf("%s:%d", targetId, config.SSH_PORT))
 		if err == nil {
 			dialConn.Close()
 			return nil
@@ -54,13 +54,13 @@ func (h *HetznerProvider) waitForDial(workspaceId string, dialTimeout time.Durat
 	}
 }
 
-func (h *HetznerProvider) getDockerClient(workspaceId string) (docker.IDockerClient, error) {
+func (h *HetznerProvider) getDockerClient(targetId string) (docker.IDockerClient, error) {
 	tsnetConn, err := h.getTsnetConn()
 	if err != nil {
 		return nil, err
 	}
 
-	remoteHost := fmt.Sprintf("tcp://%s:2375", workspaceId)
+	remoteHost := fmt.Sprintf("tcp://%s:2375", targetId)
 	cli, err := client.NewClientWithOpts(client.WithDialContext(tsnetConn.Dial), client.WithHost(remoteHost), client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err

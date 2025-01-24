@@ -8,8 +8,8 @@ import (
 
 	hetznerutil "github.com/daytonaio/daytona-provider-hetzner/pkg/provider/util"
 	"github.com/daytonaio/daytona-provider-hetzner/pkg/types"
+	"github.com/daytonaio/daytona/pkg/models"
 	"github.com/daytonaio/daytona/pkg/provider"
-	"github.com/daytonaio/daytona/pkg/workspace"
 )
 
 var (
@@ -24,104 +24,105 @@ var (
 		APIToken:   apiToken,
 	}
 
-	workspaceReq *provider.WorkspaceRequest
+	targetReq *provider.TargetRequest
 )
 
-func TestCreateWorkspace(t *testing.T) {
-	_, err := hetznerProvider.CreateWorkspace(workspaceReq)
+func TestCreateTarget(t *testing.T) {
+	_, err := hetznerProvider.CreateTarget(targetReq)
 	if err != nil {
-		t.Errorf("Error creating workspace: %s", err)
+		t.Errorf("Error creating target: %s", err)
 	}
 
-	_, err = hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
+	_, err = hetznerutil.GetServer(targetReq.Target, targetOptions)
 	if err != nil {
 		t.Fatalf("Error getting server: %s", err)
 	}
 }
 
-func TestWorkspaceInfo(t *testing.T) {
-	workspaceInfo, err := hetznerProvider.GetWorkspaceInfo(workspaceReq)
+func TestGetTargetProviderMetadata(t *testing.T) {
+	targetProviderMetadata, err := hetznerProvider.GetTargetProviderMetadata(targetReq)
 	if err != nil {
-		t.Fatalf("Error getting workspace info: %s", err)
+		t.Fatalf("Error getting target info: %s", err)
 	}
 
-	var workspaceMetadata types.WorkspaceMetadata
-	err = json.Unmarshal([]byte(workspaceInfo.ProviderMetadata), &workspaceMetadata)
+	var targetMetadata types.TargetMetadata
+	err = json.Unmarshal([]byte(targetProviderMetadata), &targetMetadata)
 	if err != nil {
-		t.Fatalf("Error unmarshalling workspace metadata: %s", err)
+		t.Fatalf("Error unmarshalling target metadata: %s", err)
 	}
 
-	server, err := hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
+	server, err := hetznerutil.GetServer(targetReq.Target, targetOptions)
 	if err != nil {
 		t.Fatalf("Error getting server: %s", err)
 	}
 
-	expectedMetadata := types.ToWorkspaceMetadata(server)
+	expectedMetadata := types.ToTargetMetadata(server)
 
-	if expectedMetadata.ServerID != workspaceMetadata.ServerID {
+	if expectedMetadata.ServerID != targetMetadata.ServerID {
 		t.Fatalf("Expected server id %d, got %d",
 			expectedMetadata.ServerID,
-			expectedMetadata.ServerID,
+			targetMetadata.ServerID,
 		)
 	}
 
-	if expectedMetadata.ServerName != workspaceMetadata.ServerName {
+	if expectedMetadata.ServerName != targetMetadata.ServerName {
 		t.Fatalf("Expected server name %s, got %s",
 			expectedMetadata.ServerName,
-			expectedMetadata.ServerName,
+			targetMetadata.ServerName,
 		)
 	}
 
-	if expectedMetadata.ServerMemory != workspaceMetadata.ServerMemory {
+	if expectedMetadata.ServerMemory != targetMetadata.ServerMemory {
 		t.Fatalf("Expected server memory %f, got %f",
 			expectedMetadata.ServerMemory,
-			workspaceMetadata.ServerMemory,
+			targetMetadata.ServerMemory,
 		)
 	}
 
-	if expectedMetadata.Architecture != workspaceMetadata.Architecture {
+	if expectedMetadata.Architecture != targetMetadata.Architecture {
 		t.Fatalf("Expected server architecture %s, got %s",
 			expectedMetadata.Architecture,
-			workspaceMetadata.Architecture,
+			targetMetadata.Architecture,
 		)
 	}
 
-	if expectedMetadata.Location != workspaceMetadata.Location {
+	if expectedMetadata.Location != targetMetadata.Location {
 		t.Fatalf("Expected server location %s, got %s",
 			expectedMetadata.Location,
-			workspaceMetadata.Location,
+			targetMetadata.Location,
 		)
 	}
 
-	if expectedMetadata.Created != workspaceMetadata.Created {
+	if expectedMetadata.Created != targetMetadata.Created {
 		t.Fatalf("Expected server created at %s, got %s",
 			expectedMetadata.Created,
-			workspaceMetadata.Created,
+			targetMetadata.Created,
 		)
 	}
 }
 
-func TestDestroyWorkspace(t *testing.T) {
-	_, err := hetznerProvider.DestroyWorkspace(workspaceReq)
+func TestDestroyTarget(t *testing.T) {
+	_, err := hetznerProvider.DestroyTarget(targetReq)
 	if err != nil {
-		t.Fatalf("Error destroying workspace: %s", err)
+		t.Fatalf("Error destroying target: %s", err)
 	}
 	time.Sleep(3 * time.Second)
 
-	_, err = hetznerutil.GetServer(workspaceReq.Workspace, targetOptions)
+	_, err = hetznerutil.GetServer(targetReq.Target, targetOptions)
 	if err == nil {
-		t.Fatalf("Error destroyed workspace still exists")
+		t.Fatalf("Error destroyed target still exists")
 	}
 }
 
 func init() {
 	_, err := hetznerProvider.Initialize(provider.InitializeProviderRequest{
-		BasePath:           "/tmp/workspaces",
+		BasePath:           "/tmp/targets",
 		DaytonaDownloadUrl: "https://download.daytona.io/daytona/install.sh",
 		DaytonaVersion:     "latest",
 		ServerUrl:          "",
 		ApiUrl:             "",
-		LogsDir:            "/tmp/logs",
+		WorkspaceLogsDir:   "/tmp/workspace/logs",
+		TargetLogsDir:      "/tmp/target/logs",
 	})
 	if err != nil {
 		panic(err)
@@ -132,11 +133,19 @@ func init() {
 		panic(err)
 	}
 
-	workspaceReq = &provider.WorkspaceRequest{
-		TargetOptions: string(opts),
-		Workspace: &workspace.Workspace{
+	targetReq = &provider.TargetRequest{
+		Target: &models.Target{
 			Id:   "123",
-			Name: "workspace",
+			Name: "target",
+			TargetConfig: models.TargetConfig{
+				Name: "test",
+				ProviderInfo: models.ProviderInfo{
+					Name:    "aws-provider",
+					Version: "test",
+				},
+				Options: string(opts),
+				Deleted: false,
+			},
 		},
 	}
 }
